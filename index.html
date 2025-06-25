@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Photobooth</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .fade-in { animation: fadeIn 0.5s ease-in-out; }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: scale(0.95); }
+      to { opacity: 1; transform: scale(1); }
+    }
+    #live-preview, #live-thumbnail {
+      transition: opacity 0.5s ease, transform 0.5s ease;
+      opacity: 0;
+      transform: scale(0.95);
+    }
+    #live-preview.show, #live-thumbnail.show {
+      opacity: 1 !important;
+      transform: scale(1) !important;
+    }
+    .btn-action {
+      @apply px-3 py-2 rounded-lg font-semibold text-white shadow-md hover:scale-105 transform transition duration-300 ease-in-out;
+    }
+  </style>
+</head>
+<body class="bg-gradient-to-br from-slate-800 to-gray-950 min-h-screen flex flex-col justify-between text-white font-sans tracking-wide">
+
+  <div class="flex-1 flex items-center justify-center px-4 py-8">
+    <div class="bg-slate-900/80 backdrop-blur-xl p-6 sm:p-8 rounded-3xl shadow-2xl w-full max-w-5xl space-y-6 border border-white/10">
+
+      <h1 class="text-3xl sm:text-4xl font-extrabold text-center text-white drop-shadow-lg">
+        📸 Photobooth
+      </h1>
+
+      <p class="text-sm sm:text-base text-center text-yellow-300 italic">
+        Gunakan fitur Live Photo dan simpan video serta thumbnail-nya secara terpisah!
+      </p>
+
+      <!-- Rasio -->
+      <div class="flex justify-center gap-4 text-sm sm:text-base">
+        <label><input type="radio" name="ratio" value="4:3" checked class="accent-blue-500"> 4:3</label>
+        <label><input type="radio" name="ratio" value="9:16" class="accent-blue-500"> 9:16</label>
+        <label><input type="radio" name="ratio" value="16:9" class="accent-blue-500"> 16:9</label>
+      </div>
+
+      <!-- Kamera -->
+      <div id="video-container" class="relative w-full">
+        <div id="video-wrapper" class="relative aspect-[4/3] w-full rounded-xl overflow-hidden shadow-2xl ring-2 ring-blue-400/40 animate-pulse">
+          <video id="video" autoplay playsinline muted class="rounded-xl w-full h-full object-cover transform scale-x-[-1] bg-black"></video>
+          <div class="absolute bottom-2 right-2 bg-black/60 text-xs sm:text-sm px-3 py-1 rounded-full text-white backdrop-blur">Live Camera</div>
+        </div>
+      </div>
+
+      <!-- Tombol -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 text-sm sm:text-base">
+        <button id="shoot" class="btn-action bg-gradient-to-r from-blue-500 to-blue-700">📸 Ambil</button>
+        <button id="save" class="btn-action bg-gradient-to-r from-green-500 to-green-700">💾 Simpan</button>
+        <button id="start" class="btn-action bg-gradient-to-r from-red-500 to-red-700">🎬 Rekam</button>
+        <button id="stop" disabled class="btn-action bg-gradient-to-r from-yellow-400 to-yellow-600 text-black">⏹ Stop</button>
+        <button id="live-photo" class="btn-action bg-gradient-to-r from-purple-500 to-purple-700">📸 Live</button>
+        <button id="save-live-thumb" class="btn-action bg-gradient-to-r from-pink-500 to-pink-700">💾 Live Video</button>
+        <button id="save-live-thumb-img" class="btn-action bg-gradient-to-r from-indigo-500 to-indigo-700">🖼️ Thumbnail</button>
+        <button id="clear" class="btn-action bg-gradient-to-r from-gray-500 to-gray-700">🧹 Bersihkan</button>
+      </div>
+
+      <!-- Hasil Output -->
+      <canvas id="canvas" class="hidden mt-4 rounded-xl shadow-xl w-full"></canvas>
+      <video id="recorded" controls class="hidden mt-4 w-full rounded-xl shadow-xl transform scale-x-[-1] bg-black"></video>
+      <video id="live-preview" autoplay muted loop playsinline class="hidden mt-4 w-full rounded-xl shadow-xl transform scale-x-[-1] bg-black"></video>
+      <img id="live-thumbnail" class="hidden mt-2 w-48 mx-auto rounded-xl shadow-xl transform scale-x-[-1]" alt="Live Thumbnail" />
+    </div>
+  </div>
+
+  <footer class="text-center text-sm text-gray-400 py-4">
+    © 2025 <span class="font-semibold text-white">Fhrrzz</span>. All rights reserved.
+  </footer>
+
+  <script>
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const recorded = document.getElementById('recorded');
+    const livePreview = document.getElementById('live-preview');
+    const liveThumb = document.getElementById('live-thumbnail');
+    const shoot = document.getElementById('shoot');
+    const save = document.getElementById('save');
+    const start = document.getElementById('start');
+    const stop = document.getElementById('stop');
+    const liveBtn = document.getElementById('live-photo');
+    const saveLiveThumb = document.getElementById('save-live-thumb');
+    const saveLiveThumbImg = document.getElementById('save-live-thumb-img');
+    const clear = document.getElementById('clear');
+
+    const ratioMap = {
+      "4:3": [4, 3],
+      "9:16": [9, 16],
+      "16:9": [16, 9],
+    };
+    let ratio = "4:3";
+    const videoWrapper = document.getElementById('video-wrapper');
+    document.querySelectorAll('input[name="ratio"]').forEach(r => r.addEventListener('change', e => {
+      ratio = e.target.value;
+      const [w, h] = ratioMap[ratio];
+      videoWrapper.className = `relative w-full aspect-[${w}/${h}] rounded-xl overflow-hidden shadow-2xl ring-2 ring-blue-400/40 animate-pulse`;
+    }));
+
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: true })
+      .then(stream => {
+        video.srcObject = stream;
+        window.globalRecorder = new MediaRecorder(stream);
+        window.recordedChunks = [];
+        globalRecorder.ondataavailable = e => recordedChunks.push(e.data);
+        globalRecorder.onstop = () => {
+          const blob = new Blob(recordedChunks, { type: 'video/webm' });
+          recorded.src = URL.createObjectURL(blob);
+          recorded.classList.remove('hidden');
+          recorded.classList.add('fade-in');
+        };
+      });
+
+    function getCropDimensions(vw, vh, ratioKey) {
+      const [rw, rh] = ratioMap[ratioKey];
+      const targetRatio = rw / rh;
+      const actualRatio = vw / vh;
+      let sw, sh, sx, sy;
+      if (actualRatio > targetRatio) {
+        sh = vh;
+        sw = vh * targetRatio;
+        sx = (vw - sw) / 2;
+        sy = 0;
+      } else {
+        sw = vw;
+        sh = vw / targetRatio;
+        sx = 0;
+        sy = (vh - sh) / 2;
+      }
+      return { sx, sy, sw, sh, dw: sw, dh: sh };
+    }
+
+    shoot.onclick = () => {
+      const vw = video.videoWidth, vh = video.videoHeight;
+      const { sx, sy, sw, sh, dw, dh } = getCropDimensions(vw, vh, ratio);
+      canvas.width = dw;
+      canvas.height = dh;
+      ctx.save();
+      ctx.setTransform(-1, 0, 0, 1, dw, 0);
+      ctx.drawImage(video, sx, sy, sw, sh, 0, 0, dw, dh);
+      ctx.restore();
+      canvas.classList.remove('hidden');
+      canvas.classList.add('fade-in');
+    };
+
+    save.onclick = () => {
+      const img = canvas.toDataURL('image/png');
+      const a = document.createElement('a');
+      a.href = img;
+      a.download = `foto-${ratio.replace(':','x')}.png`;
+      a.click();
+    };
+
+    start.onclick = () => {
+      recordedChunks = [];
+      globalRecorder.start();
+      start.disabled = true;
+      stop.disabled = false;
+    };
+
+    stop.onclick = () => {
+      globalRecorder.stop();
+      start.disabled = false;
+      stop.disabled = true;
+    };
+
+    liveBtn.onclick = async () => {
+      const vw = video.videoWidth, vh = video.videoHeight;
+      const { sx, sy, sw, sh, dw, dh } = getCropDimensions(vw, vh, ratio);
+      const mirrorCanvas = document.createElement('canvas');
+      mirrorCanvas.width = dw;
+      mirrorCanvas.height = dh;
+      const mirrorCtx = mirrorCanvas.getContext('2d');
+      const stream = mirrorCanvas.captureStream(30);
+      const recorder = new MediaRecorder(stream);
+      const tempChunks = [];
+
+      recorder.ondataavailable = e => tempChunks.push(e.data);
+      recorder.onstop = () => {
+        const blob = new Blob(tempChunks, { type: 'video/webm' });
+        const url = URL.createObjectURL(blob);
+        livePreview.src = url;
+        livePreview.classList.remove('hidden');
+        livePreview.classList.add('show');
+        livePreview.play();
+      };
+
+      recorder.start();
+      const duration = 3000;
+      const interval = 33;
+      const frames = duration / interval;
+
+      for (let i = 0; i < frames; i++) {
+        mirrorCtx.save();
+        mirrorCtx.setTransform(-1, 0, 0, 1, dw, 0);
+        mirrorCtx.drawImage(video, sx, sy, sw, sh, 0, 0, dw, dh);
+        mirrorCtx.restore();
+
+        if (i === Math.floor(frames / 2)) {
+          const thumbCanvas = document.createElement('canvas');
+          thumbCanvas.width = dw;
+          thumbCanvas.height = dh;
+          const thumbCtx = thumbCanvas.getContext('2d');
+          thumbCtx.save();
+          thumbCtx.setTransform(-1, 0, 0, 1, dw, 0);
+          thumbCtx.drawImage(video, sx, sy, sw, sh, 0, 0, dw, dh);
+          thumbCtx.restore();
+          liveThumb.src = thumbCanvas.toDataURL('image/png');
+          liveThumb.classList.remove('hidden');
+          liveThumb.classList.add('show');
+        }
+        await new Promise(r => setTimeout(r, interval));
+      }
+
+      recorder.stop();
+    };
+
+    saveLiveThumb.onclick = () => {
+      if (livePreview.src) {
+        fetch(livePreview.src)
+          .then(res => res.blob())
+          .then(blob => {
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `live-foto-${ratio.replace(':','x')}.webm`;
+            link.click();
+          });
+      }
+    };
+
+    saveLiveThumbImg.onclick = () => {
+      if (liveThumb.src) {
+        const link = document.createElement('a');
+        link.href = liveThumb.src;
+        link.download = `live-foto-thumb-${ratio.replace(':','x')}.png`;
+        link.click();
+      } else {
+        alert("Thumbnail belum tersedia!");
+      }
+    };
+
+    clear.onclick = () => {
+      [canvas, recorded, livePreview, liveThumb].forEach(el => {
+        el.classList.add('hidden');
+        if (el.tagName === 'VIDEO') {
+          el.pause();
+          el.removeAttribute('src');
+          el.load();
+        } else {
+          el.src = '';
+        }
+      });
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    };
+  </script>
+</body>
+</html>
